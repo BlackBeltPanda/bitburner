@@ -1,264 +1,150 @@
-const stockSymbols = ['ECP', 'BLD', 'OMTK', 'FSIG', 'FLCM', 'CTYS']
-const avgTrackers = {}
-const profitTrackers = {}
-const risingTrackers = {}
-const firstInvests = {}
-
-let corpus
-
-function localeHHMMSS(ms = 0) {
-  if (!ms) {
-    ms = new Date().getTime()
-  }
-
-  return new Date(ms).toLocaleTimeString()
-}
-
-const average = (arr) => arr.reduce((p, c) => p + c, 0) / arr.length
+var totalprofit = 0;
+var startTime = new Date(new Date().getTime()).toLocaleTimeString();
+const c = { ounter: 0 };
 
 /** @param {import(".").NS } ns */
-function getMoney(ns) {
-  return ns.getServerMoneyAvailable('home') - 300000
+function tendStocks(ns) {
+    const allStocks = getAllStocks(ns);
+
+    // select stocks with <51% chance to increase price
+    const stocksToSell = getBearStocks(allStocks, 0.51);
+    // sell all those stocks
+    sellStocks(ns, stocksToSell);
+
+    // select stocks with >55% chance to increase price
+    const stocksToBuy = getBullStocks(allStocks, 0.55);
+    // buy the highest-rated stocks available
+    buyStocks(ns, stocksToBuy);
+
+    // keep a log of net worth change over time
+    const portfolioValue = getPortfolioValue(allStocks);
+    const cashValue = ns.getPlayer().money;
+    const totalValue = portfolioValue + cashValue;
+    c.ounter += 1
+    if (c.ounter == 9 && delay > 30) {
+        ns.tprint(`Net worth: ${ns.nFormat(totalValue, "$0.000a")} = ${ns.nFormat(portfolioValue, "$0.0a")} stocks + ${ns.nFormat(cashValue, "$0.0a")} cash`);
+    } else if (c.ounter == 10) {
+        c.ounter = 0
+    }
 }
 
 /** @param {import(".").NS } ns */
-function processTick(ns, stockSymbol) {
-  const profitMargin = 0.05
-  const minimumMoneyToInvest = 1000000
-  let profitTracker = profitTrackers[stockSymbol] || {}
-  let positionChanged = false
-  let avgTracker = avgTrackers[stockSymbol] || []
-  let rising = risingTrackers[stockSymbol]
-  avgTracker.push(ns.getStockPrice(stockSymbol))
-  avgTracker = avgTracker.slice(-40)
+function getAllStocks(ns) {
+    // make a lookup table of all stocks and all their properties
+    const stockSymbols = ns.stock.getSymbols();
+    const stocks = {};
+    for (const symbol of stockSymbols) {
 
-  if (avgTracker.length === 40) {
-    let profitPercentage
-    let profitMarginCrossed = false
-    const avg40 = average(avgTracker)
-    const avg10 = average(avgTracker.slice(-10))
-
-    if (profitTracker.volume && profitTracker.position) {
-      const stockSaleGain = ns.getStockSaleGain(stockSymbol, profitTracker.volume, profitTracker.position)
-      profitPercentage = (stockSaleGain - profitTracker.volume * profitTracker.value) / (profitTracker.volume * profitTracker.value)
-
-      if (Math.abs(profitPercentage) > profitMargin) {
-        profitMarginCrossed = true
-      }
+        const pos = ns.stock.getPosition(symbol);
+        const stock = {
+            symbol: symbol,
+            forecast: ns.stock.getForecast(symbol),
+            volatility: ns.stock.getVolatility(symbol),
+            askPrice: ns.stock.getAskPrice(symbol),
+            bidPrice: ns.stock.getBidPrice(symbol),
+            maxShares: ns.stock.getMaxShares(symbol),
+            shares: pos[0],
+            sharesAvgPrice: pos[1],
+            sharesShort: pos[2],
+            sharesAvgPriceShort: pos[3]
+        };
+        stock.summary = `${stock.symbol}: ${stock.forecast.toFixed(3)} ± ${stock.volatility.toFixed(3)}`;
+        stocks[symbol] = stock;
     }
+    return stocks;
+}
 
-    if (profitMarginCrossed) {
-      const shortSellValue = ns.sellShort(stockSymbol, 9999999999999999999999999)
-      if (shortSellValue && profitTracker.volume) {
-        const profit = profitTracker.volume * (profitTracker.value - shortSellValue) - 200000
-        corpus += profit
-
-        const message = `[${localeHHMMSS()}] ${stockSymbol}, profitPercentage: ${ns.nFormat(profitPercentage, '0.0%')}, selling shorts,
-          profitTracker.volume: ${profitTracker.volume}, profitTracker.value: ${ns.nFormat(profitTracker.value, '$0.000a')},
-          shortSellValue: ${ns.nFormat(shortSellValue, '$0.000a')},
-          profit: ${ns.nFormat(profit, '$0.000a')}, corpus: ${ns.nFormat(corpus, '$0.000a')}`
-          .replace(/\r/g, '')
-          .replace(/\n/g, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-        ns.tprint(message)
-
-        profitTracker = {
-          position: '',
-          value: 0,
-          volume: 0,
-        }
-      }
-
-      const longSellValue = ns.sellStock(stockSymbol, 9999999999999999999999999)
-      if (longSellValue && profitTracker.volume) {
-        const profit = profitTracker.volume * (longSellValue - profitTracker.value) - 200000
-        corpus += profit
-
-        const message = `[${localeHHMMSS()}] ${stockSymbol}, profitPercentage: ${ns.nFormat(profitPercentage, '0.0%')}, selling longs,
-          profitTracker.volume: ${profitTracker.volume}, profitTracker.value: ${ns.nFormat(profitTracker.value, '$0.000a')},
-          longSellValue: ${ns.nFormat(longSellValue, '$0.000a')},
-          profit: ${ns.nFormat(profit, '$0.000a')}, corpus: ${ns.nFormat(corpus, '$0.000a')}`
-          .replace(/\r/g, '')
-          .replace(/\n/g, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-        ns.tprint(message)
-
-        profitTracker = {
-          position: '',
-          value: 0,
-          volume: 0,
-        }
-      }
+function getPortfolioValue(stocks) {
+    let value = 0;
+    for (const stock of Object.values(stocks)) {
+        value += stock.bidPrice * stock.shares - stock.askPrice * stock.sharesShort;
     }
+    return value;
+}
 
-    if (rising !== avg10 > avg40 || profitMarginCrossed) {
-      positionChanged = true
-      rising = avg10 > avg40
-    }
-
-    if (positionChanged) {
-      if (rising) {
-        // It's rising now, sell short, buy long
-        const shortSellValue = ns.sellShort(stockSymbol, 9999999999999999999999999)
-        if (shortSellValue && profitTracker.volume) {
-          const profit = profitTracker.volume * (profitTracker.value - shortSellValue) - 200000
-          corpus += profit
-
-          const message = `[${localeHHMMSS()}] ${stockSymbol}, selling shorts,
-            profitTracker.volume: ${profitTracker.volume}, profitTracker.value: ${ns.nFormat(profitTracker.value, '$0.000a')},
-            shortSellValue: ${ns.nFormat(shortSellValue, '$0.000a')},
-            profit: ${ns.nFormat(profit, '$0.000a')}, corpus: ${ns.nFormat(corpus, '$0.000a')}`
-            .replace(/\r/g, '')
-            .replace(/\n/g, '')
-            .replace(/\s+/g, ' ')
-            .trim()
-          ns.tprint(message)
-
-          profitTracker = {
-            position: '',
-            value: 0,
-            volume: 0,
-          }
+function getBullStocks(stocks, threshold = 0.55) {
+    // select stocks with at least threshold % chance to increase each cycle
+    const bullStocks = [];
+    for (const stock of Object.values(stocks)) {
+        if (stock.forecast - stock.volatility > threshold) {
+            bullStocks.push(stock);
         }
+    }
+    return bullStocks;
+}
 
-        const moneyToInvest = firstInvests[stockSymbol] ? getMoney(ns) : Math.floor(corpus / 6)
-        if (moneyToInvest > minimumMoneyToInvest) {
-          let volume = Math.floor(moneyToInvest / ns.getStockAskPrice(stockSymbol))
-          volume = Math.min(volume, ns.getStockMaxShares(stockSymbol))
+function getBearStocks(stocks, threshold = 0.48) {
+    // select stocks with at most threshold % chance to increase each cycle
+    const bearStocks = [];
+    for (const stock of Object.values(stocks)) {
+        if (stock.forecast - stock.volatility < threshold) {
+            bearStocks.push(stock);
+        }
+    }
+    return bearStocks;
+}
 
-          if (volume > 0) {
-            const longBuyValue = ns.buyStock(stockSymbol, volume)
-
-            const message = `[${localeHHMMSS()}] ${stockSymbol}, buying longs,
-              volume: ${volume},
-              price per share: ${ns.nFormat(longBuyValue, '$0.000a')},
-              invested: ${ns.nFormat(volume * longBuyValue, '$0.000a')},
-              moneyToInvest: ${ns.nFormat(moneyToInvest, '$0.000a')},
-              corpus: ${ns.nFormat(corpus, '$0.000a')}`
-              .replace(/\r/g, '')
-              .replace(/\n/g, '')
-              .replace(/\s+/g, ' ')
-              .trim()
-            ns.tprint(message)
-
-            if (longBuyValue && volume) {
-              firstInvests[stockSymbol] = true
-              profitTracker = {
-                position: 'Long',
-                value: longBuyValue,
-                volume,
-              }
+/** @param {import(".").NS } ns */
+function sellStocks(ns, stocksToSell) {
+    for (const stock of stocksToSell) {
+        if (stock.shares > 0) {
+            const salePrice = ns.stock.sell(stock.symbol, stock.shares);
+            if (salePrice != 0) {
+                const saleTotal = salePrice * stock.shares;
+                const saleCost = stock.sharesAvgPrice * stock.shares;
+                const saleProfit = saleTotal - saleCost;
+                stock.shares = 0;
+                ns.tprint(`Sold ${stock.summary} stock for ${ns.nFormat(saleProfit, "$0.0a")} profit`);
+                totalprofit += saleProfit;
+                ns.tprint(`Total Stock Profits Since ${startTime}: ${ns.nFormat(totalprofit, "$0.0a")}`);
             }
-          } else {
-            ns.tprint(`[${localeHHMMSS()}] ERROR #1: ${stockSymbol}, buying longs, volume: ${volume},
-              getMoney(ns): ${getMoney(ns)}, Math.floor(corpus / 6): ${Math.floor(corpus / 6)},
-              moneyToInvest: ${ns.nFormat(moneyToInvest, '$0.000a')}`)
-          }
-        } else {
-          ns.tprint(`[${localeHHMMSS()}] ERROR #2: ${stockSymbol}, buying longs,
-            getMoney(ns): ${getMoney(ns)}, Math.floor(corpus / 6): ${Math.floor(corpus / 6)},
-            moneyToInvest: ${ns.nFormat(moneyToInvest, '$0.000a')}`)
         }
-      } else {
-        // It's falling now, sell long, buy short
-        const longSellValue = ns.sellStock(stockSymbol, 9999999999999999999999999)
-        if (longSellValue && profitTracker.volume) {
-          const profit = profitTracker.volume * (longSellValue - profitTracker.value) - 200000
-          corpus += profit
-
-          const message = `[${localeHHMMSS()}] ${stockSymbol}, selling longs,
-            profitTracker.volume: ${profitTracker.volume}, profitTracker.value: ${ns.nFormat(profitTracker.value, '$0.000a')},
-            longSellValue: ${ns.nFormat(longSellValue, '$0.000a')},
-            profit: ${ns.nFormat(profit, '$0.000a')}, corpus: ${ns.nFormat(corpus, '$0.000a')}`
-            .replace(/\r/g, '')
-            .replace(/\n/g, '')
-            .replace(/\s+/g, ' ')
-            .trim()
-          ns.tprint(message)
-
-          profitTracker = {
-            position: '',
-            value: 0,
-            volume: 0,
-          }
-        }
-
-        const moneyToInvest = firstInvests[stockSymbol] ? getMoney(ns) : Math.floor(corpus / 6)
-        if (moneyToInvest > minimumMoneyToInvest) {
-          let volume = Math.floor(moneyToInvest / ns.getStockBidPrice(stockSymbol))
-          volume = Math.min(volume, ns.getStockMaxShares(stockSymbol))
-
-          if (volume > 0) {
-            const shortBuyValue = ns.shortStock(stockSymbol, volume)
-
-            const message = `[${localeHHMMSS()}] ${stockSymbol}, buying shorts,
-              volume: ${volume},
-              price per share: ${ns.nFormat(shortBuyValue, '$0.000a')},
-              invested: ${ns.nFormat(volume * shortBuyValue, '$0.000a')},
-              moneyToInvest: ${ns.nFormat(moneyToInvest, '$0.000a')},
-              corpus: ${ns.nFormat(corpus, '$0.000a')}`
-              .replace(/\r/g, '')
-              .replace(/\n/g, '')
-              .replace(/\s+/g, ' ')
-              .trim()
-            ns.tprint(message)
-
-            if (shortBuyValue && volume) {
-              firstInvests[stockSymbol] = true
-              profitTracker = {
-                position: 'Short',
-                value: shortBuyValue,
-                volume,
-              }
-            }
-          } else {
-            ns.tprint(`[${localeHHMMSS()}] ERROR #3: ${stockSymbol}, buying shorts, volume: ${volume},
-              getMoney(ns): ${getMoney(ns)}, Math.floor(corpus / 6): ${Math.floor(corpus / 6)},
-              moneyToInvest: ${ns.nFormat(moneyToInvest, '$0.000a')}`)
-          }
-        } else {
-          ns.tprint(`[${localeHHMMSS()}] ERROR #4: ${stockSymbol}, buying shorts,
-            getMoney(ns): ${getMoney(ns)}, Math.floor(corpus / 6): ${Math.floor(corpus / 6)},
-            moneyToInvest: ${ns.nFormat(moneyToInvest, '$0.000a')}`)
-        }
-      }
     }
-  }
+}
 
-  avgTrackers[stockSymbol] = avgTracker
-  profitTrackers[stockSymbol] = profitTracker
-  risingTrackers[stockSymbol] = rising
+/** @param {import(".").NS } ns */
+function buyStocks(ns, stocksToBuy) {
+    // buy stocks, spending more money on higher rated stocks
+    const bestStocks = stocksToBuy.sort((a, b) => {
+        return b.forecast - a.forecast; // descending
+    });
+
+    let transactions = 0;
+    if (ns.args[0]) { var maxTransactions = ns.args[0]; } else { var maxTransactions = 4; };
+    if (ns.args[1]) { var savings = ns.args[1]; } else { var savings = 5000000 };
+    for (const stock of bestStocks) {
+        const moneyRemaining = ns.getPlayer().money;
+        // don't spend the last 5 million bux
+        if (moneyRemaining < savings || transactions >= maxTransactions) {
+            return;
+        }
+        // spend up to half the money available on the highest rated stock
+        // (the following stock will buy half as much)
+        const moneyThisStock = moneyRemaining / 2 - 100000;
+        let numShares = moneyThisStock / stock.askPrice;
+
+        numShares = Math.min(numShares, stock.maxShares - stock.shares - stock.sharesShort);
+        const boughtPrice = ns.stock.buy(stock.symbol, numShares);
+        if (boughtPrice != 0) {
+            const boughtTotal = boughtPrice * numShares;
+            transactions += 1;
+            stock.shares += numShares;
+            ns.tprint(`Bought ${ns.nFormat(boughtTotal, "$0.0a")} of ${stock.summary}`);
+        }
+    }
 }
 
 /** @param {import(".").NS } ns */
 export async function main(ns) {
-  ns.disableLog('ALL')
-  let tickCounter = 1
-  corpus = ns.getServerMoneyAvailable('home') - 1000000
-
-  stockSymbols.forEach((stockSymbol) => {
-    const [sharesLong, avgPriceLong, sharesShort, avgPriceShort] = ns.getStockPosition(stockSymbol)
-
-    corpus += sharesLong * avgPriceLong + sharesShort * avgPriceShort
-  })
-
-  ns.print(`[${localeHHMMSS()}] Tick counter: 1, corpus: ${ns.nFormat(corpus, '$0.000a')}`)
-  while (true) {
-    for (let i = 0; i < stockSymbols.length; i++) {
-      const stockSymbol = stockSymbols[i]
-      processTick(ns, stockSymbol)
-      await ns.sleep(1)
+    if (ns.args[2]) { var delay = ns.args[2]; } else { var delay = 60; };//delay in seconds
+    var delay = delay * 1000;//change to ms
+    ns.disableLog("sleep");
+    ns.disableLog("stock.buy");
+    ns.disableLog("stock.sell");
+    while (true) {
+        tendStocks(ns);
+        await ns.sleep(delay);
     }
-    if (tickCounter % 10 === 0) {
-      ns.print(`[${localeHHMMSS()}] Tick counter: ${tickCounter}, corpus: ${ns.nFormat(corpus, '$0.000a')}`)
-    }
-
-    if (tickCounter % 50 === 0) {
-      ns.tprint(`[${localeHHMMSS()}] Tick counter: ${tickCounter}, corpus: ${ns.nFormat(corpus, '$0.000a')}`)
-    }
-    await ns.sleep(5995)
-    tickCounter++
-  }
 }
+
+// vim: set ft=javascript :
