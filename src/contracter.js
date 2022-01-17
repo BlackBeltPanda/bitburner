@@ -403,7 +403,7 @@ function findAnswer(contract) {
 
 /** @param {import(".").NS } ns */
 export async function main(ns) {
-  ns.tprint(`[${localeHHMMSS()}] Starting contracter.ns`)
+  ns.tprint(`[${localeHHMMSS()}] Starting contracter.js`)
 
   let hostname = ns.getHostname()
 

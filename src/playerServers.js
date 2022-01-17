@@ -87,7 +87,7 @@ function getPurchasedServers(ns) {
 
 /** @param {import(".").NS } ns */
 export async function main(ns) {
-  ns.tprint(`[${localeHHMMSS()}] Starting playerServers.ns`)
+  ns.tprint(`[${localeHHMMSS()}] Starting playerServers.js`)
 
   settings.maxGbRam = ns.getPurchasedServerMaxRam()
   settings.maxPlayerServers = ns.getPurchasedServerLimit()

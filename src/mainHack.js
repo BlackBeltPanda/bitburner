@@ -29,7 +29,7 @@ function setItem(key, value) {
 }
 
 const hackPrograms = ['BruteSSH.exe', 'FTPCrack.exe', 'relaySMTP.exe', 'HTTPWorm.exe', 'SQLInject.exe']
-const hackScripts = ['hack.ns', 'grow.ns', 'weaken.ns']
+const hackScripts = ['hack.js', 'grow.js', 'weaken.js']
 
 /** @param {import(".").NS } ns */
 function getPlayerDetails(ns) {
@@ -90,15 +90,15 @@ function weakenCyclesForHack(hackCycles) {
 }
 
 /** @param {import(".").NS } ns */
-async function getHackableServers(ns, servers) {
+async function getVulnerableServers(ns, servers) {
   const playerDetails = getPlayerDetails(ns)
 
-  const hackableServers = Object.keys(servers)
+  const vulnerableServers = Object.keys(servers)
     .filter((hostname) => ns.serverExists(hostname))
     .filter((hostname) => servers[hostname].ports <= playerDetails.portHacks || ns.hasRootAccess(hostname))
     .filter((hostname) => servers[hostname].ram >= 2)
 
-  for (const hostname of hackableServers) {
+  for (const hostname of vulnerableServers) {
     if (hostname === 'home') continue;
     if (!ns.hasRootAccess(hostname)) {
       hackPrograms.forEach((hackProgram) => {
@@ -113,8 +113,8 @@ async function getHackableServers(ns, servers) {
 
   }
 
-  hackableServers.sort((a, b) => servers[a].ram - servers[b].ram)
-  return hackableServers
+  vulnerableServers.sort((a, b) => servers[a].ram - servers[b].ram)
+  return vulnerableServers
 }
 
 /** @param {import(".").NS } ns */
@@ -153,7 +153,7 @@ function findTargetServer(ns, serversList, servers, serverExtraData) {
 
 /** @param {import(".").NS } ns */
 export async function main(ns) {
-  ns.tprint(`[${localeHHMMSS()}] Starting mainHack.ns`)
+  ns.tprint(`[${localeHHMMSS()}] Starting mainHack.js`)
 
   let hostname = ns.getHostname()
 
@@ -169,20 +169,20 @@ export async function main(ns) {
     }
 
     if (!serverMap || serverMap.lastUpdate < new Date().getTime() - settings.mapRefreshInterval) {
-      ns.tprint(`[${localeHHMMSS()}] Spawning spider.ns`)
-      ns.spawn('spider.ns', 1, 'mainHack.ns')
+      ns.tprint(`[${localeHHMMSS()}] Spawning spider.js`)
+      ns.spawn('spider.js', 1, 'mainHack.js')
       ns.exit()
       return
     }
     serverMap.servers.home.ram = Math.max(0, serverMap.servers.home.ram - settings.homeRamReserved)
 
-    const hackableServers = await getHackableServers(ns, serverMap.servers)
+    const vulnerableServers = await getVulnerableServers(ns, serverMap.servers)
 
-    const targetServers = findTargetServer(ns, hackableServers, serverMap.servers, serverExtraData)
+    const targetServers = findTargetServer(ns, vulnerableServers, serverMap.servers, serverExtraData)
     const bestTarget = targetServers.shift()
-    const hackTime = ns.getHackTime(bestTarget) * 1000
-    const growTime = ns.getGrowTime(bestTarget) * 1000
-    const weakenTime = ns.getWeakenTime(bestTarget) * 1000
+    const hackTime = ns.getHackTime(bestTarget)
+    const growTime = ns.getGrowTime(bestTarget)
+    const weakenTime = ns.getWeakenTime(bestTarget)
 
     const growDelay = Math.max(0, weakenTime - growTime - 15 * 1000)
     const hackDelay = Math.max(0, growTime + growDelay - hackTime - 15 * 1000)
@@ -203,8 +203,8 @@ export async function main(ns) {
     let growCycles = 0
     let weakenCycles = 0
 
-    for (let i = 0; i < hackableServers.length; i++) {
-      const server = serverMap.servers[hackableServers[i]]
+    for (let i = 0; i < vulnerableServers.length; i++) {
+      const server = serverMap.servers[vulnerableServers[i]]
       hackCycles += Math.floor(server.ram / 1.7)
       growCycles += Math.floor(server.ram / 1.75)
     }
@@ -243,19 +243,19 @@ export async function main(ns) {
         }`
       )
 
-      for (let i = 0; i < hackableServers.length; i++) {
-        const server = serverMap.servers[hackableServers[i]]
+      for (let i = 0; i < vulnerableServers.length; i++) {
+        const server = serverMap.servers[vulnerableServers[i]]
         let cyclesFittable = Math.max(0, Math.floor(server.ram / 1.75))
         const cyclesToRun = Math.max(0, Math.min(cyclesFittable, growCycles))
 
         if (growCycles) {
-          await ns.exec('grow.ns', server.host, cyclesToRun, bestTarget, cyclesToRun, growDelay, createUUID())
+          await ns.exec('grow.js', server.host, cyclesToRun, bestTarget, cyclesToRun, growDelay, createUUID())
           growCycles -= cyclesToRun
           cyclesFittable -= cyclesToRun
         }
 
         if (cyclesFittable) {
-          await ns.exec('weaken.ns', server.host, cyclesFittable, bestTarget, cyclesFittable, 0, createUUID())
+          await ns.exec('weaken.js', server.host, cyclesFittable, bestTarget, cyclesFittable, 0, createUUID())
           weakenCycles -= cyclesFittable
         }
       }
@@ -265,19 +265,19 @@ export async function main(ns) {
 
       ns.tprint(`[${localeHHMMSS()}] Cycles ratio: ${growCycles} grow cycles; ${weakenCycles} weaken cycles`)
 
-      for (let i = 0; i < hackableServers.length; i++) {
-        const server = serverMap.servers[hackableServers[i]]
+      for (let i = 0; i < vulnerableServers.length; i++) {
+        const server = serverMap.servers[vulnerableServers[i]]
         let cyclesFittable = Math.max(0, Math.floor(server.ram / 1.75))
         const cyclesToRun = Math.max(0, Math.min(cyclesFittable, growCycles))
 
         if (growCycles) {
-          await ns.exec('grow.ns', server.host, cyclesToRun, bestTarget, cyclesToRun, growDelay, createUUID())
+          await ns.exec('grow.js', server.host, cyclesToRun, bestTarget, cyclesToRun, growDelay, createUUID())
           growCycles -= cyclesToRun
           cyclesFittable -= cyclesToRun
         }
 
         if (cyclesFittable) {
-          await ns.exec('weaken.ns', server.host, cyclesFittable, bestTarget, cyclesFittable, 0, createUUID())
+          await ns.exec('weaken.js', server.host, cyclesFittable, bestTarget, cyclesFittable, 0, createUUID())
           weakenCycles -= cyclesFittable
         }
       }
@@ -304,13 +304,13 @@ export async function main(ns) {
 
       ns.tprint(`[${localeHHMMSS()}] Cycles ratio: ${hackCycles} hack cycles; ${growCycles} grow cycles; ${weakenCycles} weaken cycles`)
 
-      for (let i = 0; i < hackableServers.length; i++) {
-        const server = serverMap.servers[hackableServers[i]]
+      for (let i = 0; i < vulnerableServers.length; i++) {
+        const server = serverMap.servers[vulnerableServers[i]]
         let cyclesFittable = Math.max(0, Math.floor(server.ram / 1.7))
         const cyclesToRun = Math.max(0, Math.min(cyclesFittable, hackCycles))
 
         if (hackCycles) {
-          await ns.exec('hack.ns', server.host, cyclesToRun, bestTarget, cyclesToRun, hackDelay, createUUID())
+          await ns.exec('hack.js', server.host, cyclesToRun, bestTarget, cyclesToRun, hackDelay, createUUID())
           hackCycles -= cyclesToRun
           cyclesFittable -= cyclesToRun
         }
@@ -321,13 +321,13 @@ export async function main(ns) {
         if (cyclesFittable && growCycles) {
           const growCyclesToRun = Math.min(growCycles, cyclesFittable)
 
-          await ns.exec('grow.ns', server.host, growCyclesToRun, bestTarget, growCyclesToRun, growDelay, createUUID())
+          await ns.exec('grow.js', server.host, growCyclesToRun, bestTarget, growCyclesToRun, growDelay, createUUID())
           growCycles -= growCyclesToRun
           cyclesFittable -= growCyclesToRun
         }
 
         if (cyclesFittable) {
-          await ns.exec('weaken.ns', server.host, cyclesFittable, bestTarget, cyclesFittable, 0, createUUID())
+          await ns.exec('weaken.js', server.host, cyclesFittable, bestTarget, cyclesFittable, 0, createUUID())
           weakenCycles -= cyclesFittable
         }
       }
